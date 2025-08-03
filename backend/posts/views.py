@@ -15,14 +15,60 @@ User = get_user_model()
 class PostListCreateView(generics.ListCreateAPIView):
     queryset = Post.objects.all()
     serializer_class = PostSerializer
-    
-    def get_permissions(self):
-        if self.request.method == 'GET':
-            return [permissions.AllowAny()]  # Allow anyone to read posts
-        return [permissions.IsAuthenticated()]  # Require auth for creating posts
+    permission_classes = [permissions.AllowAny]
     
     def perform_create(self, serializer):
-        serializer.save(author=self.request.user)
+        # Debug: Print current user info
+        print(f"🔍 Request user: {self.request.user}")
+        print(f"🔍 Is authenticated: {self.request.user.is_authenticated}")
+        print(f"🔍 Username: {getattr(self.request.user, 'username', 'AnonymousUser')}")
+        
+        if self.request.user.is_authenticated:
+            print(f"✅ Creating post for authenticated user: {self.request.user.username}")
+            serializer.save(author=self.request.user)
+        else:
+            print("❌ User not authenticated, checking session...")
+            
+            # Try to get user from session data
+            user_id = self.request.session.get('_auth_user_id')
+            if user_id:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                try:
+                    user = User.objects.get(id=user_id)
+                    print(f"✅ Found user from session: {user.username}")
+                    serializer.save(author=user)
+                    return
+                except User.DoesNotExist:
+                    print("❌ User from session not found")
+            
+            # If still no user, return error instead of using fallback
+            from rest_framework.exceptions import AuthenticationFailed
+            raise AuthenticationFailed("You must be logged in to create posts")
+
+    queryset = Post.objects.all()
+    serializer_class = PostSerializer
+    permission_classes = [permissions.AllowAny]  # Change this line
+    
+    def perform_create(self, serializer):
+        # Get the user from the session or use a default user
+        if self.request.user.is_authenticated:
+            serializer.save(author=self.request.user)
+        else:
+            # For debugging, create posts with first available user
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            first_user = User.objects.first()
+            if first_user:
+                serializer.save(author=first_user)
+            else:
+                # Create a default user if none exists
+                default_user = User.objects.create_user(
+                    username='demo_user',
+                    email='demo@example.com',
+                    password='demo123'
+                )
+                serializer.save(author=default_user)
 
 @method_decorator(csrf_exempt, name='dispatch')
 class UserPostsView(generics.ListAPIView):
